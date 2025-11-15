@@ -3,9 +3,10 @@ from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QAction, QLineEdit,
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
-    QMessageBox # Used for proper message and confirmation boxes
+    QMessageBox
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.Qt import QDesktopServices # Required for handling external links (like Navi://cws)
 
 # --- Personal Website Builder Window ---
 class WebsiteBuilderWindow(QWidget):
@@ -89,7 +90,8 @@ class WebsiteBuilderWindow(QWidget):
         html_content = self.content_input.toPlainText().strip()
         
         # Check for duplication only if creating a NEW site
-        if not self.domain_to_edit and full_domain in self.browser_main.personal_websites:
+        is_new_site = not self.domain_to_edit
+        if is_new_site and full_domain in self.browser_main.personal_websites:
             self.show_error(f"Domain '{full_domain}' already exists. Please choose a different name or edit the existing site.")
             return
         
@@ -188,12 +190,12 @@ class SimpleBrowser(QMainWindow):
         self.browser.urlChanged.connect(self.update_url)
         self.browser.titleChanged.connect(self.setWindowTitle)
         
-        self.builder_window = None # Keep a reference to the builder window
+        self.builder_window = None 
 
     def navigate_to_url_bar_text(self, text):
         """Helper to set text and navigate programmatically."""
         self.url_bar.setText(text)
-        self.navigate_to_url(is_internal_click=True) # Treat this as an internal action
+        self.navigate_to_url()
 
     def show_message(self, title, message, icon=QMessageBox.Information):
         """Custom message box for feedback."""
@@ -262,7 +264,6 @@ class SimpleBrowser(QMainWindow):
         </body>
         </html>
         """
-        # We use QUrl("about:blank") as a base URL to ensure internal links are not misresolved
         self.browser.setHtml(manager_html, QUrl("about:blank")) 
         self.setWindowTitle("Personal Website Manager")
 
@@ -274,7 +275,7 @@ class SimpleBrowser(QMainWindow):
             self.show_message("Error", f"Could not find website '{domain}' to delete.", QMessageBox.Warning)
             return
 
-        # Use QMessageBox for confirmation (instead of alert/confirm)
+        # Use QMessageBox for confirmation 
         reply = QMessageBox.question(self, 'Confirm Deletion', 
                                      f"Are you sure you want to permanently delete '{domain}'?",
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -290,43 +291,53 @@ class SimpleBrowser(QMainWindow):
         """Navigates to the default home page."""
         self.browser.setUrl(QUrl("https://www.google.com"))
 
-    def navigate_to_url(self, is_internal_click=False):
+    def handle_internal_command(self, url):
+        """Processes Navi:// commands and returns True if handled, False otherwise."""
+        url = url.strip()
+        if not url.lower().startswith("navi://"):
+            return False
+
+        command = url[7:].lower()
+        
+        if command == "pw" or command == "pw/":
+            self.load_personal_websites_manager()
+            return True
+        
+        if command == "pw/new":
+            self.show_website_builder(domain_to_edit=None) # Create new site
+            return True
+        
+        # Handle Edit requests: Navi://pw/edit/domain.pw-navi
+        if command.startswith("pw/edit/"):
+            domain_to_edit = command[8:]
+            self.show_website_builder(domain_to_edit) # Edit existing site
+            return True
+        
+        # Handle deletion requests: Navi://pw/delete/domain.pw-navi
+        if command.startswith("pw/delete/"):
+            domain_to_delete = command[10:]
+            self.delete_personal_website(domain_to_delete)
+            return True
+
+        # Handle Chrome Web Store request
+        if command == "cws" or command == "cws/":
+            # Navigate to the actual web store link using QWebEngineView
+            self.browser.setUrl(QUrl("https://chrome.google.com/webstore"))
+            return True
+            
+        return False
+
+    def navigate_to_url(self):
         """
         Navigates to the entered URL, performs a search, or loads the custom site/internal page.
         """
         url = self.url_bar.text().strip()
         
-        # --- Internal Protocol Handling ---
-        if url.lower().startswith("navi://"):
-            command = url[7:].lower()
-            
-            if command == "pw" or command == "pw/":
-                self.load_personal_websites_manager()
-                return
-            
-            if command == "pw/new":
-                self.show_website_builder(domain_to_edit=None) # Create new site
-                return
-            
-            # Handle Edit requests: Navi://pw/edit/domain.pw-navi
-            if command.startswith("pw/edit/"):
-                domain_to_edit = command[8:]
-                self.show_website_builder(domain_to_edit) # Edit existing site
-                return
-            
-            # Handle deletion requests: Navi://pw/delete/domain.pw-navi
-            if command.startswith("pw/delete/"):
-                domain_to_delete = command[10:]
-                self.delete_personal_website(domain_to_delete)
-                return
+        # 1. Handle Internal Protocol
+        if self.handle_internal_command(url):
+            return
 
-            # Handle Chrome Web Store request
-            if command == "cws" or command == "cws/":
-                # Navigate to the actual web store link as requested
-                self.browser.setUrl(QUrl("https://chrome.google.com/webstore"))
-                return
-
-        # --- Custom Domain Check ---
+        # 2. Handle Custom Domain Check
         if url.lower().endswith(".pw-navi"):
             site_data = self.personal_websites.get(url.lower())
             if site_data:
@@ -335,7 +346,7 @@ class SimpleBrowser(QMainWindow):
                 self.setWindowTitle(site_data.get('title', 'Navi Site'))
                 return
 
-        # Regular navigation/search logic
+        # 3. Regular navigation/search logic
         if url.startswith(("http://", "https://")):
             self.browser.setUrl(QUrl(url))
         elif "." in url:
@@ -353,15 +364,12 @@ class SimpleBrowser(QMainWindow):
         url_str = q.toString()
 
         # Check if the browser is navigating to a custom internal protocol URL
-        is_navi_command = url_str.lower().startswith("navi://")
-
-        if is_navi_command:
+        if url_str.lower().startswith("navi://"):
             # If it's a Navi:// command (likely from an internal link click),
             # update the URL bar and immediately execute the command logic.
             self.url_bar.setText(url_str)
             self.url_bar.setCursorPosition(0)
-            self.navigate_to_url(is_internal_click=True)
-            # The browser tried to navigate to navi://, we handled it, so we stop further processing
+            self.navigate_to_url()
             return
 
         # Update URL bar for external web pages and the internal "local://" pages
@@ -371,6 +379,7 @@ class SimpleBrowser(QMainWindow):
 
 
 if __name__ == '__main__':
+    # Ensure the QApplication instance is created robustly
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -381,5 +390,6 @@ if __name__ == '__main__':
     try:
         sys.exit(app.exec_())
     except SystemExit:
+        print("Application closed gracefully.")
         pass
 
