@@ -6,7 +6,6 @@ from PyQt5.QtWidgets import (
     QMessageBox
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.Qt import QDesktopServices # Required for handling external links (like Navi://cws)
 
 # --- Personal Website Builder Window ---
 class WebsiteBuilderWindow(QWidget):
@@ -154,9 +153,20 @@ class SimpleBrowser(QMainWindow):
         self.setWindowTitle("Navi Browser")
         self.setGeometry(100, 100, 1200, 800)
 
+        # --- FINAL FIX: Set QMainWindow background to white to eliminate blue bar ---
+        self.setStyleSheet("QMainWindow { background-color: white; }")
+        # --- END FIX ---
+
         self.browser = QWebEngineView()
         self.browser.setUrl(QUrl("https://www.google.com"))
-        self.setCentralWidget(self.browser)
+        
+        # Use a central widget to contain the browser, ensuring it fills space
+        central_widget = QWidget()
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(0, 0, 0, 0) # Remove margin around the browser view
+        layout.addWidget(self.browser)
+        self.setCentralWidget(central_widget)
+        
 
         # --- Navbar Setup ---
         navbar = QToolBar("Navigation")
@@ -172,7 +182,6 @@ class SimpleBrowser(QMainWindow):
         
         # Builder/Manager Button
         builder_btn = QAction("🌐 Builder", self)
-        # Clicking the Builder button now navigates to the manager page
         builder_btn.triggered.connect(lambda: self.navigate_to_url_bar_text("Navi://pw"))
         navbar.addAction(builder_btn)
 
@@ -321,7 +330,6 @@ class SimpleBrowser(QMainWindow):
 
         # Handle Chrome Web Store request
         if command == "cws" or command == "cws/":
-            # Navigate to the actual web store link using QWebEngineView
             self.browser.setUrl(QUrl("https://chrome.google.com/webstore"))
             return True
             
@@ -333,11 +341,11 @@ class SimpleBrowser(QMainWindow):
         """
         url = self.url_bar.text().strip()
         
-        # 1. Handle Internal Protocol
+        # 1. Handle Internal Protocol (Navi://)
         if self.handle_internal_command(url):
             return
 
-        # 2. Handle Custom Domain Check
+        # 2. Handle Custom Domain Check (.pw-navi)
         if url.lower().endswith(".pw-navi"):
             site_data = self.personal_websites.get(url.lower())
             if site_data:
@@ -379,7 +387,6 @@ class SimpleBrowser(QMainWindow):
 
 
 if __name__ == '__main__':
-    # Ensure the QApplication instance is created robustly
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
